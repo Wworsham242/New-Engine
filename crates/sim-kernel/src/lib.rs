@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod registry;
+
 use sim_state::{StateHash, WorldState};
 
 #[derive(Clone, Copy, Debug)]

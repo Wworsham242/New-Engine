@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+sim-equations = { path = "../sim-equations" }
+sim-registry = { path = "../sim-registry" }
+sim-types = { path = "../sim-types" }
 sim-state = { path = "../sim-state" }
 subsystem-demographics = { path = "../subsystem-demographics" }
 subsystem-economy = { path = "../subsystem-economy" }

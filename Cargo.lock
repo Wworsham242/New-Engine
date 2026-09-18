@@ -88,7 +88,10 @@ dependencies = [
 name = "sim-kernel"
 version = "0.1.0"
 dependencies = [
+ "sim-equations",
+ "sim-registry",
  "sim-state",
+ "sim-types",
  "subsystem-demographics",
  "subsystem-economy",
  "subsystem-energy",
@@ -100,6 +103,14 @@ name = "sim-random"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "sim-types",
+]
+
+[[package]]
+name = "sim-registry"
+version = "0.1.0"
+dependencies = [
+ "sim-equations",
  "sim-types",
 ]
 
@@ -121,6 +132,7 @@ name = "sim-tools"
 version = "0.1.0"
 dependencies = [
  "sim-kernel",
+ "sim-registry",
  "sim-state",
 ]
 
@@ -137,7 +149,9 @@ name = "subsystem-demographics"
 version = "0.1.0"
 dependencies = [
  "sim-contracts",
+ "sim-equations",
  "sim-state",
+ "sim-types",
 ]
 
 [[package]]
@@ -145,7 +159,9 @@ name = "subsystem-economy"
 version = "0.1.0"
 dependencies = [
  "sim-contracts",
+ "sim-equations",
  "sim-state",
+ "sim-types",
  "sim-units",
 ]
 
@@ -154,7 +170,9 @@ name = "subsystem-energy"
 version = "0.1.0"
 dependencies = [
  "sim-contracts",
+ "sim-equations",
  "sim-state",
+ "sim-types",
  "sim-units",
 ]
 
@@ -163,6 +181,8 @@ name = "subsystem-governance"
 version = "0.1.0"
 dependencies = [
  "sim-contracts",
+ "sim-equations",
  "sim-state",
+ "sim-types",
  "sim-units",
 ]

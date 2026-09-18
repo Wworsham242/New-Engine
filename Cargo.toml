@@ -5,6 +5,7 @@ members = [
     "crates/sim-storage",
     "crates/sim-units",
     "crates/sim-equations",
+    "crates/sim-registry",
     "crates/sim-contracts",
     "crates/sim-state",
     "crates/sim-kernel",

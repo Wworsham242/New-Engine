@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod metadata;
+
 use sim_contracts::EconomyToGovernance;
 use sim_state::GovernanceState;
 use sim_units::Currency;

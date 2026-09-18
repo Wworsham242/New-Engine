@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod metadata;
+
 use sim_contracts::DemographicsOutputs;
 use sim_state::DemographicsState;
 

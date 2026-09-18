@@ -1,14 +1,11 @@
 [package]
-name = "subsystem-governance"
+name = "sim-registry"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 sim-equations = { path = "../sim-equations" }
 sim-types = { path = "../sim-types" }
-sim-contracts = { path = "../sim-contracts" }
-sim-state = { path = "../sim-state" }
-sim-units = { path = "../sim-units" }
 
 [lib]
 path = "src/lib.rs"

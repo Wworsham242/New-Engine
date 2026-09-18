@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+sim-registry = { path = "../sim-registry" }
 sim-kernel = { path = "../sim-kernel" }
 sim-state = { path = "../sim-state" }
 

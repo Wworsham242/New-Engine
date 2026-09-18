@@ -18,6 +18,18 @@ impl CountryId {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct RegionId(pub u32);
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct ProvinceId(pub u32);
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct SectorId(pub u16);
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct EnergyTypeId(pub u16);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(u16)]
 pub enum SubsystemId {
@@ -49,4 +61,35 @@ pub enum Cadence {
     Annual,
     InternalSubstep,
     OnEvent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VariableKind {
+    Stock,
+    Flow,
+    Rate,
+    Index,
+    Parameter,
+    Derived,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TemporalSemantics {
+    CurrentCommitted,
+    CurrentIteration,
+    PreviousTick,
+    RollingAverage,
+    RollingSum,
+    Trend,
+    PipelineState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScopeKind {
+    Global,
+    Country,
+    Region,
+    Province,
+    CountrySector,
+    CountryEnergyType,
 }

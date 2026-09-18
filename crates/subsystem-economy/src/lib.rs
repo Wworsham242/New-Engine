@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod metadata;
+
 use sim_contracts::{EconomyToEnergy, EconomyToGovernance, EnergyToEconomy};
 use sim_state::EconomyState;
 use sim_units::RealGdp;
