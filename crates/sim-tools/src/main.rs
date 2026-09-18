@@ -110,6 +110,7 @@ fn world_demo() -> Result<(), Box<dyn std::error::Error>> {
     initial.validate()?;
 
     let usa = initial.country_id_by_key("USA").unwrap();
+    let can = initial.country_id_by_key("CAN").unwrap();
     let oil = initial.energy_type_id_by_key("oil").unwrap();
 
     let kernel = SimulationKernel::default();
@@ -127,7 +128,7 @@ fn world_demo() -> Result<(), Box<dyn std::error::Error>> {
         }),
     )?;
 
-    println!("New Engine Phase 003 country-indexed deterministic world slice");
+    println!("New Engine Phase 004 international energy transmission slice");
     println!(
         "world: countries={} energy_types={} variables={} equations={} solver_groups={}",
         baseline.country_count(),
@@ -135,6 +136,30 @@ fn world_demo() -> Result<(), Box<dyn std::error::Error>> {
         registry.variables.len(),
         registry.equations.len(),
         registry.solver_groups.len(),
+    );
+    println!();
+
+    let baseline_usa_can = baseline
+        .energy
+        .realized_trade_by_type
+        .get(usa.index(), can.index(), oil.0 as usize)
+        .unwrap()
+        .0;
+    let shock_usa_can = shock
+        .energy
+        .realized_trade_by_type
+        .get(usa.index(), can.index(), oil.0 as usize)
+        .unwrap()
+        .0;
+
+    println!(
+        "USA -> CAN oil flow: baseline={:.3} shock={:.3}",
+        baseline_usa_can, shock_usa_can
+    );
+    println!(
+        "trade conservation error: baseline={:.3e} shock={:.3e}",
+        subsystem_energy::trade_conservation_error(&baseline.energy),
+        subsystem_energy::trade_conservation_error(&shock.energy),
     );
     println!();
 

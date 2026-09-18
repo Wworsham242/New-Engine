@@ -16,7 +16,7 @@ pub static VARIABLES: &[VariableMetadata] = &[
         unit_key: "real_gdp",
         kind: VariableKind::Flow,
         temporal: TemporalSemantics::CurrentIteration,
-        scope: ScopeKind::Global,
+        scope: ScopeKind::Country,
         provenance: &[ProvenanceTag::OriginalDesign],
     },
     VariableMetadata {
@@ -26,7 +26,7 @@ pub static VARIABLES: &[VariableMetadata] = &[
         unit_key: "real_gdp",
         kind: VariableKind::Derived,
         temporal: TemporalSemantics::CurrentCommitted,
-        scope: ScopeKind::Global,
+        scope: ScopeKind::Country,
         provenance: &[ProvenanceTag::OriginalDesign],
     },
     VariableMetadata {
@@ -36,7 +36,7 @@ pub static VARIABLES: &[VariableMetadata] = &[
         unit_key: "currency",
         kind: VariableKind::Flow,
         temporal: TemporalSemantics::CurrentCommitted,
-        scope: ScopeKind::Global,
+        scope: ScopeKind::Country,
         provenance: &[ProvenanceTag::OriginalDesign],
     },
 ];

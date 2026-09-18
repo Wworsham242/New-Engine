@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use sim_registry::WorldRegistry;
-use sim_storage::{Dense1, Dense2};
+use sim_storage::{Dense1, Dense2, Dense3};
 use sim_types::{CountryId, EnergyTypeId, Tick};
 use sim_units::{Currency, EnergyQuantity, Population, PriceIndex, Rate, RealGdp};
 
@@ -9,6 +9,15 @@ use sim_units::{Currency, EnergyQuantity, Population, PriceIndex, Rate, RealGdp}
 pub struct EnergyState {
     pub capacity_by_type: Dense2<EnergyQuantity>,
     pub production_by_type: Dense2<EnergyQuantity>,
+
+    /// Desired physical flows [origin, destination, energy_type].
+    ///
+    /// This is an authoritative commitment/plan in Phase 004.
+    pub planned_trade_by_type: Dense3<EnergyQuantity>,
+
+    /// Actually deliverable physical flows after origin production constraints.
+    pub realized_trade_by_type: Dense3<EnergyQuantity>,
+
     pub demand: Dense1<EnergyQuantity>,
     pub price_index: Dense1<PriceIndex>,
     pub shortage_fraction: Dense1<Rate>,
@@ -72,7 +81,7 @@ impl WorldState {
         let mut capacity_by_type = Dense2::new(countries, energy_types, EnergyQuantity(0.0));
         let mut production_by_type = Dense2::new(countries, energy_types, EnergyQuantity(0.0));
 
-        // Phase-003 demo numbers are engineering fixtures, not real-world data.
+        // Engineering fixture only; not real-world calibrated data.
         let capacities = [
             [45.0, 30.0, 25.0], // USA total 100
             [20.0, 15.0, 15.0], // CAN total 50
@@ -86,16 +95,66 @@ impl WorldState {
             }
         }
 
+        let mut planned_trade_by_type =
+            Dense3::new(countries, countries, energy_types, EnergyQuantity(0.0));
+
+        // Balanced physical oil trade fixture:
+        // SAU -> USA = 30
+        // USA -> CAN = 30
+        //
+        // With domestic production totals and demand:
+        // USA: 100 + 30 - 30 = 100
+        // CAN:  50 + 30      = 80
+        // SAU:  60      - 30 = 30
+        //
+        // A USA oil-capacity shock can therefore reduce USA exports to Canada,
+        // transmitting the physical shortage internationally.
+        let usa = registry
+            .countries()
+            .iter()
+            .find(|x| x.key == "USA")
+            .unwrap()
+            .id;
+        let can = registry
+            .countries()
+            .iter()
+            .find(|x| x.key == "CAN")
+            .unwrap()
+            .id;
+        let sau = registry
+            .countries()
+            .iter()
+            .find(|x| x.key == "SAU")
+            .unwrap()
+            .id;
+        let oil = registry
+            .energy_types()
+            .iter()
+            .find(|x| x.key == "oil")
+            .unwrap()
+            .id;
+
+        *planned_trade_by_type
+            .get_mut(sau.index(), usa.index(), oil.0 as usize)
+            .unwrap() = EnergyQuantity(30.0);
+        *planned_trade_by_type
+            .get_mut(usa.index(), can.index(), oil.0 as usize)
+            .unwrap() = EnergyQuantity(30.0);
+
+        let realized_trade_by_type = planned_trade_by_type.clone();
+
         Self {
             tick: Tick(0),
             registry,
             energy: EnergyState {
                 capacity_by_type,
                 production_by_type,
+                planned_trade_by_type,
+                realized_trade_by_type,
                 demand: Dense1::from_vec(vec![
                     EnergyQuantity(100.0),
-                    EnergyQuantity(50.0),
-                    EnergyQuantity(60.0),
+                    EnergyQuantity(80.0),
+                    EnergyQuantity(30.0),
                 ]),
                 price_index: Dense1::from_vec(vec![
                     PriceIndex(1.0),
@@ -105,22 +164,22 @@ impl WorldState {
                 shortage_fraction: Dense1::from_vec(vec![Rate(0.0), Rate(0.0), Rate(0.0)]),
             },
             economy: EconomyState {
-                gdp: Dense1::from_vec(vec![RealGdp(1_000.0), RealGdp(500.0), RealGdp(600.0)]),
+                gdp: Dense1::from_vec(vec![RealGdp(1_000.0), RealGdp(800.0), RealGdp(300.0)]),
                 potential_gdp: Dense1::from_vec(vec![
                     RealGdp(1_000.0),
-                    RealGdp(500.0),
-                    RealGdp(600.0),
+                    RealGdp(800.0),
+                    RealGdp(300.0),
                 ]),
                 investment: Dense1::from_vec(vec![
                     Currency(200.0),
-                    Currency(100.0),
-                    Currency(120.0),
+                    Currency(160.0),
+                    Currency(60.0),
                 ]),
             },
             governance: GovernanceState {
                 tax_rate: Dense1::from_vec(vec![Rate(0.20), Rate(0.20), Rate(0.20)]),
-                revenue: Dense1::from_vec(vec![Currency(200.0), Currency(100.0), Currency(120.0)]),
-                spending: Dense1::from_vec(vec![Currency(220.0), Currency(110.0), Currency(130.0)]),
+                revenue: Dense1::from_vec(vec![Currency(200.0), Currency(160.0), Currency(60.0)]),
+                spending: Dense1::from_vec(vec![Currency(220.0), Currency(175.0), Currency(70.0)]),
             },
             demographics: DemographicsState {
                 population: Dense1::from_vec(vec![
@@ -178,6 +237,12 @@ impl WorldState {
             || self.energy.production_by_type.rows() != countries
             || self.energy.capacity_by_type.cols() != energy_types
             || self.energy.production_by_type.cols() != energy_types
+            || self.energy.planned_trade_by_type.dim0() != countries
+            || self.energy.planned_trade_by_type.dim1() != countries
+            || self.energy.planned_trade_by_type.dim2() != energy_types
+            || self.energy.realized_trade_by_type.dim0() != countries
+            || self.energy.realized_trade_by_type.dim1() != countries
+            || self.energy.realized_trade_by_type.dim2() != energy_types
         {
             return Err("dense state dimensions do not match world registry");
         }
@@ -191,6 +256,20 @@ impl WorldState {
             .chain(
                 self.energy
                     .production_by_type
+                    .canonical_values()
+                    .iter()
+                    .map(|x| x.0),
+            )
+            .chain(
+                self.energy
+                    .planned_trade_by_type
+                    .canonical_values()
+                    .iter()
+                    .map(|x| x.0),
+            )
+            .chain(
+                self.energy
+                    .realized_trade_by_type
                     .canonical_values()
                     .iter()
                     .map(|x| x.0),
@@ -209,30 +288,32 @@ impl WorldState {
             if !value.is_finite() {
                 return Err("authoritative state contains a non-finite value");
             }
+            if value < 0.0 {
+                return Err("authoritative state contains a negative quantity");
+            }
         }
 
-        if self
-            .energy
-            .capacity_by_type
-            .canonical_values()
-            .iter()
-            .any(|x| x.0 < 0.0)
-            || self
-                .energy
-                .production_by_type
-                .canonical_values()
-                .iter()
-                .any(|x| x.0 < 0.0)
-            || self.energy.demand.as_slice().iter().any(|x| x.0 < 0.0)
-            || self.economy.gdp.as_slice().iter().any(|x| x.0 < 0.0)
-            || self
-                .demographics
-                .population
-                .as_slice()
-                .iter()
-                .any(|x| x.0 < 0.0)
-        {
-            return Err("authoritative state contains a negative physical stock/flow");
+        // No self-trade in the Phase-004 physical flow matrix.
+        for country in 0..countries {
+            for energy_type in 0..energy_types {
+                if self
+                    .energy
+                    .planned_trade_by_type
+                    .get(country, country, energy_type)
+                    .unwrap()
+                    .0
+                    != 0.0
+                    || self
+                        .energy
+                        .realized_trade_by_type
+                        .get(country, country, energy_type)
+                        .unwrap()
+                        .0
+                        != 0.0
+                {
+                    return Err("self-trade is not permitted");
+                }
+            }
         }
 
         Ok(())
@@ -241,10 +322,9 @@ impl WorldState {
     pub fn canonical_hash(&self) -> StateHash {
         let mut hasher = blake3::Hasher::new();
 
-        hasher.update(b"new-engine.world-state.phase003.v1");
+        hasher.update(b"new-engine.world-state.phase004.v1");
         hasher.update(&self.tick.0.to_le_bytes());
 
-        // Registry identity is authoritative and encoded in canonical ID order.
         for country in self.registry.countries() {
             hasher.update(&country.id.0.to_le_bytes());
             hash_string(&mut hasher, &country.key);
@@ -268,6 +348,22 @@ impl WorldState {
             &mut hasher,
             self.energy
                 .production_by_type
+                .canonical_values()
+                .iter()
+                .map(|x| x.0),
+        );
+        hash_f64s(
+            &mut hasher,
+            self.energy
+                .planned_trade_by_type
+                .canonical_values()
+                .iter()
+                .map(|x| x.0),
+        );
+        hash_f64s(
+            &mut hasher,
+            self.energy
+                .realized_trade_by_type
                 .canonical_values()
                 .iter()
                 .map(|x| x.0),
@@ -331,17 +427,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn equal_country_indexed_state_has_equal_hash() {
+    fn equal_trade_world_has_equal_hash() {
         let a = WorldState::demo();
         let b = a.clone();
         assert_eq!(a.canonical_hash(), b.canonical_hash());
     }
 
     #[test]
-    fn country_specific_change_changes_hash() {
+    fn trade_change_changes_hash() {
         let a = WorldState::demo();
         let mut b = a.clone();
-        b.economy.gdp.get_mut(1).unwrap().0 -= 1.0;
+
+        let usa = b.country_id_by_key("USA").unwrap();
+        let can = b.country_id_by_key("CAN").unwrap();
+        let oil = b.energy_type_id_by_key("oil").unwrap();
+
+        b.energy
+            .planned_trade_by_type
+            .get_mut(usa.index(), can.index(), oil.0 as usize)
+            .unwrap()
+            .0 -= 1.0;
+
         assert_ne!(a.canonical_hash(), b.canonical_hash());
     }
 

@@ -52,7 +52,6 @@ impl SimulationKernel {
     ) -> Result<TickReport, &'static str> {
         world.validate()?;
 
-        // Phase 1: primitive exogenous input.
         if let Some(Shock::EnergyCapacityLossFraction {
             country,
             energy_type,
@@ -67,14 +66,10 @@ impl SimulationKernel {
             );
         }
 
-        // Work on owned subsystem working state. Committed world state is not
-        // exposed across subsystem boundaries during the coupled solve.
         let mut energy = world.energy.clone();
         let mut economy = world.economy.clone();
-
         let country_count = world.country_count();
 
-        // Phase 2: bounded Jacobi-style coupled solve.
         let mut converged = false;
         let mut max_residual = f64::INFINITY;
         let mut iterations = 0;
@@ -83,7 +78,7 @@ impl SimulationKernel {
             iterations = iteration;
             max_residual = 0.0;
 
-            // Immutable C[n] contract snapshots in canonical CountryId order.
+            // C[n] contract snapshots.
             let economy_to_energy: Vec<_> = (0..country_count)
                 .map(|index| {
                     subsystem_economy::publish_to_energy(&economy, CountryId(index as u32))
@@ -94,17 +89,9 @@ impl SimulationKernel {
                 .map(|index| subsystem_energy::publish(&energy, CountryId(index as u32)))
                 .collect();
 
-            // Independent country candidates from the same iteration snapshot.
-            let energy_candidates: Vec<_> = (0..country_count)
-                .map(|index| {
-                    let country = CountryId(index as u32);
-                    subsystem_energy::solve_country_candidate(
-                        &energy,
-                        country,
-                        economy_to_energy[index],
-                    )
-                })
-                .collect();
+            // Energy now solves one globally connected physical trade candidate.
+            let energy_candidate =
+                subsystem_energy::solve_global_candidate(&energy, &economy_to_energy);
 
             let economy_candidates: Vec<_> = (0..country_count)
                 .map(|index| {
@@ -117,12 +104,12 @@ impl SimulationKernel {
                 })
                 .collect();
 
-            // Residuals are reduced deterministically in ascending CountryId.
+            // Canonical residual reduction.
             for index in 0..country_count {
                 let current_gdp = economy.gdp.get(index).unwrap().0;
                 let current_price = energy.price_index.get(index).unwrap().0;
                 let candidate_gdp = economy_candidates[index].0;
-                let candidate_price = energy_candidates[index].2.0;
+                let candidate_price = energy_candidate.price_index.get(index).unwrap().0;
 
                 let gdp_residual = (candidate_gdp - current_gdp).abs() / current_gdp.abs().max(1.0);
                 let price_residual =
@@ -131,24 +118,13 @@ impl SimulationKernel {
                 max_residual = max_residual.max(gdp_residual.max(price_residual));
             }
 
-            // Deterministic barrier then damping/apply in ascending CountryId.
+            // Barrier then deterministic damping.
+            subsystem_energy::blend_global(&mut energy, &energy_candidate, self.solver.damping);
+
             for index in 0..country_count {
-                let country = CountryId(index as u32);
-                let (production, demand, price, shortage) = &energy_candidates[index];
-
-                subsystem_energy::blend_country(
-                    &mut energy,
-                    country,
-                    production,
-                    *demand,
-                    *price,
-                    *shortage,
-                    self.solver.damping,
-                );
-
                 subsystem_economy::blend_country(
                     &mut economy,
-                    country,
+                    CountryId(index as u32),
                     economy_candidates[index],
                     self.solver.damping,
                 );
@@ -160,7 +136,6 @@ impl SimulationKernel {
             }
         }
 
-        // Phase 3: slower dependent systems consume final bounded result.
         let mut governance = world.governance.clone();
         for index in 0..country_count {
             let country = CountryId(index as u32);
@@ -171,7 +146,6 @@ impl SimulationKernel {
         let mut demographics = world.demographics.clone();
         subsystem_demographics::advance_month(&mut demographics);
 
-        // Phase 4: one logical authoritative commit.
         world.energy = energy;
         world.economy = economy;
         world.governance = governance;
@@ -179,6 +153,11 @@ impl SimulationKernel {
         world.tick = world.tick.next();
 
         world.validate()?;
+
+        if subsystem_energy::trade_conservation_error(&world.energy) > 1.0e-12 {
+            return Err("physical energy trade conservation failed");
+        }
+
         let state_hash = world.canonical_hash();
 
         Ok(TickReport {
@@ -203,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn same_multi_country_input_produces_same_hash() {
+    fn same_international_input_produces_same_hash() {
         let kernel = SimulationKernel::default();
         let mut a = WorldState::demo();
         let mut b = WorldState::demo();
@@ -218,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn country_specific_energy_shock_propagates_only_through_target_country_in_phase003() {
+    fn usa_energy_shock_propagates_to_canada_through_physical_trade() {
         let kernel = SimulationKernel::default();
         let mut baseline = WorldState::demo();
         let mut shock = baseline.clone();
@@ -227,23 +206,36 @@ mod tests {
         kernel.step(&mut baseline, None).unwrap();
         kernel.step(&mut shock, Some(shock_event)).unwrap();
 
-        let usa = shock.country_id_by_key("USA").unwrap().index();
-        let can = shock.country_id_by_key("CAN").unwrap().index();
+        let usa = shock.country_id_by_key("USA").unwrap();
+        let can = shock.country_id_by_key("CAN").unwrap();
+        let oil = shock.energy_type_id_by_key("oil").unwrap();
 
         assert!(
-            shock.energy.price_index.get(usa).unwrap().0
-                > baseline.energy.price_index.get(usa).unwrap().0
-        );
-        assert!(shock.economy.gdp.get(usa).unwrap().0 < baseline.economy.gdp.get(usa).unwrap().0);
-        assert!(
-            shock.governance.revenue.get(usa).unwrap().0
-                < baseline.governance.revenue.get(usa).unwrap().0
+            shock.economy.gdp.get(usa.index()).unwrap().0
+                < baseline.economy.gdp.get(usa.index()).unwrap().0
         );
 
-        // Cross-country trade is not modeled yet, so Canada is deliberately unchanged.
-        assert_eq!(
-            shock.economy.gdp.get(can).unwrap().0,
-            baseline.economy.gdp.get(can).unwrap().0
+        // Canada's economy now moves because the USA cannot fully meet the
+        // planned USA -> CAN oil flow after the capacity shock.
+        assert!(
+            shock.economy.gdp.get(can.index()).unwrap().0
+                < baseline.economy.gdp.get(can.index()).unwrap().0
         );
+
+        let baseline_flow = baseline
+            .energy
+            .realized_trade_by_type
+            .get(usa.index(), can.index(), oil.0 as usize)
+            .unwrap()
+            .0;
+        let shock_flow = shock
+            .energy
+            .realized_trade_by_type
+            .get(usa.index(), can.index(), oil.0 as usize)
+            .unwrap()
+            .0;
+
+        assert!(shock_flow < baseline_flow);
+        assert!(subsystem_energy::trade_conservation_error(&shock.energy) <= 1.0e-12);
     }
 }

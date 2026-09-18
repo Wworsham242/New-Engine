@@ -92,4 +92,5 @@ pub enum ScopeKind {
     Province,
     CountrySector,
     CountryEnergyType,
+    CountryPairEnergyType,
 }

@@ -10,7 +10,7 @@ pub static VARIABLES: &[VariableMetadata] = &[VariableMetadata {
     unit_key: "population",
     kind: VariableKind::Stock,
     temporal: TemporalSemantics::CurrentCommitted,
-    scope: ScopeKind::Global,
+    scope: ScopeKind::Country,
     provenance: &[ProvenanceTag::OriginalDesign],
 }];
 

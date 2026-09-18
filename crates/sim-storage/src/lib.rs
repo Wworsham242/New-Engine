@@ -104,6 +104,59 @@ impl<T> Dense2<T> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dense3<T> {
+    dim0: usize,
+    dim1: usize,
+    dim2: usize,
+    values: Vec<T>,
+}
+
+impl<T: Clone> Dense3<T> {
+    pub fn new(dim0: usize, dim1: usize, dim2: usize, value: T) -> Self {
+        Self {
+            dim0,
+            dim1,
+            dim2,
+            values: vec![value; dim0 * dim1 * dim2],
+        }
+    }
+}
+
+impl<T> Dense3<T> {
+    pub fn dim0(&self) -> usize {
+        self.dim0
+    }
+
+    pub fn dim1(&self) -> usize {
+        self.dim1
+    }
+
+    pub fn dim2(&self) -> usize {
+        self.dim2
+    }
+
+    fn index(&self, i: usize, j: usize, k: usize) -> Option<usize> {
+        if i >= self.dim0 || j >= self.dim1 || k >= self.dim2 {
+            return None;
+        }
+        Some((i * self.dim1 + j) * self.dim2 + k)
+    }
+
+    pub fn get(&self, i: usize, j: usize, k: usize) -> Option<&T> {
+        self.index(i, j, k).and_then(|index| self.values.get(index))
+    }
+
+    pub fn get_mut(&mut self, i: usize, j: usize, k: usize) -> Option<&mut T> {
+        let index = self.index(i, j, k)?;
+        self.values.get_mut(index)
+    }
+
+    pub fn canonical_values(&self) -> &[T] {
+        &self.values
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct StableHandle(pub u32);
 
@@ -153,6 +206,13 @@ mod tests {
         let mut store = Dense2::new(2, 3, 0_u32);
         store.row_mut(1).unwrap().copy_from_slice(&[4, 5, 6]);
         assert_eq!(store.row(1).unwrap(), &[4, 5, 6]);
+    }
+
+    #[test]
+    fn dense3_is_canonical_row_major() {
+        let mut store = Dense3::new(2, 2, 2, 0_u32);
+        *store.get_mut(1, 0, 1).unwrap() = 7;
+        assert_eq!(store.canonical_values(), &[0, 0, 0, 0, 0, 7, 0, 0]);
     }
 
     #[test]
