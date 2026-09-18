@@ -2,7 +2,7 @@
 
 **Status:** Architecture baseline  
 **Repository target:** `Wworsham242/New-Engine`  
-**Primary implementation language:** C++  
+**Primary implementation language:** Rust  
 **Document purpose:** Define the executable simulation architecture for a deterministic, high-fidelity grand-strategy / geopolitical world engine.
 
 ## 1. Purpose
@@ -124,7 +124,7 @@ The kernel does not determine GDP, energy production, food demand, fertility, re
 
 The engine has one authoritative discrete master clock. A master tick advances the authoritative world state by the configured base interval.
 
-The modern-world profile should support a practical monthly or quarterly base cadence, while selected subsystems may substep internally.
+Per ADR-001, the initial modern-world profile uses a **monthly authoritative master tick**, while selected subsystems may substep internally or run only when their slower cadence is due.
 
 ### 6.2 Cadence classes
 
@@ -145,11 +145,12 @@ A subsystem may run deterministic internal substeps without advancing global tim
 Example:
 
 ```text
-Quarterly master tick
-    Military:      13 weekly substeps
-    Energy:         3 monthly substeps
-    Economy:        1 quarterly solve
-    Demographics:   accumulate flows; annual cohort transition at year boundary
+Monthly master tick
+    Military:      daily/weekly internal substeps
+    Energy:         monthly solve
+    Economy:        monthly accumulation; quarterly structural solve
+    Governance:     monthly cash-flow/fiscal updates; slower structural updates as configured
+    Demographics:   monthly accumulation; annual cohort transition at year boundary
 ```
 
 ### 6.4 Tick phases
@@ -219,16 +220,16 @@ Examples: population cohorts, productive capital, refineries, power plants, road
 
 Examples: construction, procurement, training, crop cycles, repairs, reconstruction, technology adoption, education cohorts, debt maturity.
 
-```cpp
-struct PipelineEntry {
-    EntityId owner;
-    PipelineType type;
-    Tick start_tick;
-    Tick completion_tick;
-    Quantity committed_quantity;
-    ResourceBundle committed_resources;
-    PipelineStatus status;
-};
+```rust
+pub struct PipelineEntry {
+    pub owner: EntityId,
+    pub pipeline_type: PipelineType,
+    pub start_tick: Tick,
+    pub completion_tick: Tick,
+    pub committed_quantity: Quantity,
+    pub committed_resources: ResourceBundle,
+    pub status: PipelineStatus,
+}
 ```
 
 ### 7.4 Historical reads
@@ -241,28 +242,28 @@ Equations are first-class model components.
 
 ### 8.1 Descriptor
 
-```cpp
-struct EquationDescriptor {
-    EquationId id;
-    SubsystemId owner;
-    VariableId output;
-    EquationClass equation_class;
-    Cadence cadence;
+```rust
+pub struct EquationDescriptor {
+    pub id: EquationId,
+    pub owner: SubsystemId,
+    pub output: VariableId,
+    pub equation_class: EquationClass,
+    pub cadence: Cadence,
 
-    std::span<const VariableId> local_inputs;
-    std::span<const ContractFieldId> external_inputs;
+    pub local_inputs: Vec<VariableId>,
+    pub external_inputs: Vec<ContractFieldId>,
 
-    bool uses_previous_state;
-    bool iterative;
+    pub uses_previous_state: bool,
+    pub iterative: bool,
 
-    double convergence_tolerance;
-    uint32_t max_iterations;
+    pub convergence_tolerance: f64,
+    pub max_iterations: u32,
 
-    ProvenanceTag provenance;
-};
+    pub provenance: ProvenanceTag,
+}
 ```
 
-Hot-path code can remain compiled C++; descriptors exist for scheduling, validation, diagnostics, and tooling.
+Hot-path code remains compiled Rust; descriptors exist for scheduling, validation, diagnostics, and tooling.
 
 ### 8.2 Equation classes
 
@@ -305,18 +306,18 @@ Side effects should occur in application/commit phases rather than deep inside e
 
 ## 9. Variable Model
 
-```cpp
-struct VariableMetadata {
-    VariableId id;
-    SubsystemId owner;
-    Unit unit;
-    ValueKind value_kind;
-    Cadence cadence;
-    AggregationRule aggregation;
-    TemporalSemantics temporal_semantics;
-    Bounds bounds;
-    ProvenanceTag provenance;
-};
+```rust
+pub struct VariableMetadata {
+    pub id: VariableId,
+    pub owner: SubsystemId,
+    pub unit: Unit,
+    pub value_kind: ValueKind,
+    pub cadence: Cadence,
+    pub aggregation: AggregationRule,
+    pub temporal_semantics: TemporalSemantics,
+    pub bounds: Bounds,
+    pub provenance: ProvenanceTag,
+}
 ```
 
 The model distinguishes stocks, flows, rates, indexes, and parameters and records dimensional units and scope.
@@ -331,38 +332,38 @@ There should not be a global mutable state bag that every subsystem can modify.
 
 Illustrative contracts:
 
-```cpp
-struct DemographicsOutputs {
-    Population total_population;
-    Population working_age_population;
-    Population youth_population;
-    Population elderly_population;
-    PopulationGrowthRate growth_rate;
-    HouseholdCount households;
-    MigrationFlows migration;
-};
+```rust
+pub struct DemographicsOutputs {
+    pub total_population: Population,
+    pub working_age_population: Population,
+    pub youth_population: Population,
+    pub elderly_population: Population,
+    pub growth_rate: PopulationGrowthRate,
+    pub households: HouseholdCount,
+    pub migration: MigrationFlows,
+}
 
-struct EnergyToEconomy {
-    EnergyQuantity production;
-    EnergyQuantity demand;
-    EnergyQuantity imports;
-    EnergyQuantity exports;
-    EnergyQuantity stocks;
-    EnergyPriceIndex price_index;
-    ShortageIndex shortage;
-    CapacityUtilization utilization;
-    EnergyIntensity energy_intensity;
-};
+pub struct EnergyToEconomy {
+    pub production: EnergyQuantity,
+    pub demand: EnergyQuantity,
+    pub imports: EnergyQuantity,
+    pub exports: EnergyQuantity,
+    pub stocks: EnergyQuantity,
+    pub price_index: EnergyPriceIndex,
+    pub shortage: ShortageIndex,
+    pub utilization: CapacityUtilization,
+    pub energy_intensity: EnergyIntensity,
+}
 
-struct EconomyToEnergy {
-    RealGDP gdp;
-    GDPPerCapita gdp_per_capita;
-    SectorDemand industrial_activity;
-    InvestmentDemand investment;
-    ImportCapacity import_capacity;
-    ExportDemand export_demand;
-    ExchangeRateState exchange_rate;
-};
+pub struct EconomyToEnergy {
+    pub gdp: RealGdp,
+    pub gdp_per_capita: GdpPerCapita,
+    pub industrial_activity: SectorDemand,
+    pub investment: InvestmentDemand,
+    pub import_capacity: ImportCapacity,
+    pub export_demand: ExportDemand,
+    pub exchange_rate: ExchangeRateState,
+}
 ```
 
 ## 11. Core Civilian Subsystems
@@ -476,17 +477,17 @@ Combat may resolve daily/weekly internally while civilian consequences are publi
 
 A shock changes causal state, policy, capacity, access, or parameters.
 
-```cpp
-struct Shock {
-    ShockId id;
-    Tick effective_tick;
-    Tick optional_end_tick;
-    Scope scope;
-    ShockTarget target;
-    ShockOperation operation;
-    double magnitude;
-    ProvenanceTag provenance;
-};
+```rust
+pub struct Shock {
+    pub id: ShockId,
+    pub effective_tick: Tick,
+    pub optional_end_tick: Option<Tick>,
+    pub scope: Scope,
+    pub target: ShockTarget,
+    pub operation: ShockOperation,
+    pub magnitude: f64,
+    pub provenance: ProvenanceTag,
+}
 ```
 
 Good scenario inputs:
@@ -551,14 +552,14 @@ production <-> income <-> consumption <-> investment
 
 ### 15.2 Solver policy
 
-```cpp
-struct SolverPolicy {
-    double absolute_tolerance;
-    double relative_tolerance;
-    double damping;
-    uint32_t max_iterations;
-    NonConvergencePolicy failure_policy;
-};
+```rust
+pub struct SolverPolicy {
+    pub absolute_tolerance: f64,
+    pub relative_tolerance: f64,
+    pub damping: f64,
+    pub max_iterations: u32,
+    pub failure_policy: NonConvergencePolicy,
+}
 ```
 
 ### 15.3 Outer coupling
@@ -685,37 +686,59 @@ Separate:
 
 Reference data is immutable during a run. Hot-path state should use compact stable IDs and contiguous storage where practical.
 
-## 23. C++ Structural Direction
+## 23. Rust Structural Direction
 
-```cpp
-class ISubsystem {
-public:
-    virtual ~ISubsystem() = default;
+ADR-001 establishes Rust as the authoritative simulation-kernel language.
 
-    virtual SubsystemId id() const = 0;
-    virtual void begin_tick(const TickContext&) = 0;
-    virtual void solve(const SolveContext&) = 0;
-    virtual void publish(ContractWriter&) const = 0;
-    virtual void reconcile(const ReconcileContext&) = 0;
-    virtual void commit(const CommitContext&) = 0;
-};
+```rust
+pub trait Subsystem {
+    type State;
+    type Inputs;
+    type Outputs;
 
-class SimulationKernel {
-public:
-    void step();
+    fn id(&self) -> SubsystemId;
 
-private:
-    SimulationClock clock_;
-    Scheduler scheduler_;
-    ContractBus contracts_;
-    DelayedEventQueue delayed_;
-    SnapshotManager snapshots_;
-    ReplayRecorder replay_;
-    Diagnostics diagnostics_;
-};
+    fn begin_tick(
+        &mut self,
+        ctx: &TickContext,
+    );
+
+    fn solve(
+        &self,
+        state: &Self::State,
+        inputs: &Self::Inputs,
+        ctx: &SolveContext,
+    ) -> SolveResult<Self::State, Self::Outputs>;
+
+    fn reconcile(
+        &self,
+        state: &mut Self::State,
+        ctx: &ReconcileContext,
+    );
+
+    fn commit(
+        &mut self,
+        next: Self::State,
+        ctx: &CommitContext,
+    );
+}
+
+pub struct SimulationKernel {
+    clock: SimulationClock,
+    scheduler: Scheduler,
+    contracts: ContractBus,
+    delayed: DelayedEventQueue,
+    snapshots: SnapshotManager,
+    replay: ReplayRecorder,
+    diagnostics: Diagnostics,
+}
 ```
 
-High-level polymorphism is acceptable; hot per-entity loops should prefer static/contiguous data-oriented code.
+Rust ownership and borrowing should reinforce subsystem state ownership and immutable contract snapshots.
+
+High-level traits are acceptable at architectural boundaries. Hot per-entity and per-cell numeric loops should prefer static dispatch, stable integer IDs, contiguous storage, and data-oriented iteration.
+
+The kernel is not required to use ECS for dense simulation state. ECS may be used selectively for sparse entities such as formations, infrastructure objects, events, or map objects.
 
 ## 24. Validation Strategy
 
@@ -860,7 +883,6 @@ Add diplomacy, sanctions, aid, environmental/resource feedback, and advanced tra
 
 Still unresolved by design:
 
-- default modern-world master tick: monthly vs quarterly;
 - exact outer-loop coupling order;
 - subsystem convergence metrics;
 - monetary/financial depth;
@@ -893,4 +915,5 @@ That vertical slice becomes the foundation for the larger world simulation.
 ---
 
 **Architecture status:** Implementation baseline pending project-owner acceptance.  
-**Next recommended document:** `ADR-001-deterministic-discrete-time-kernel.md`.
+**ADR-001:** `adr/ADR-001-deterministic-discrete-time-kernel.md` establishes the Rust kernel and monthly modern-world master tick.  
+**Next recommended document:** `ADR-002-authoritative-state-ownership-and-typed-contracts.md`.
