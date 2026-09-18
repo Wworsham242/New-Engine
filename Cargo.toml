@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/sim-types",
+    "crates/sim-storage",
+    "crates/sim-units",
+    "crates/sim-equations",
+    "crates/sim-contracts",
+    "crates/sim-state",
+    "crates/sim-kernel",
+    "crates/sim-random",
+    "crates/sim-tools",
+    "crates/subsystem-demographics",
+    "crates/subsystem-energy",
+    "crates/subsystem-economy",
+    "crates/subsystem-governance",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+blake3 = "1"

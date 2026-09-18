@@ -1,0 +1,12 @@
+[package]
+name = "sim-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sim-kernel = { path = "../sim-kernel" }
+sim-state = { path = "../sim-state" }
+
+[[bin]]
+name = "sim-tools"
+path = "src/main.rs"

@@ -1,0 +1,10 @@
+[package]
+name = "sim-contracts"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sim-units = { path = "../sim-units" }
+
+[lib]
+path = "src/lib.rs"

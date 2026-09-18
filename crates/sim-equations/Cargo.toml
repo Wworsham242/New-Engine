@@ -1,0 +1,10 @@
+[package]
+name = "sim-equations"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sim-types = { path = "../sim-types" }
+
+[lib]
+path = "src/lib.rs"

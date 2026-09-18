@@ -1,0 +1,12 @@
+[package]
+name = "sim-state"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+blake3.workspace = true
+sim-types = { path = "../sim-types" }
+sim-units = { path = "../sim-units" }
+
+[lib]
+path = "src/lib.rs"

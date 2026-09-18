@@ -1,0 +1,12 @@
+[package]
+name = "subsystem-economy"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sim-contracts = { path = "../sim-contracts" }
+sim-state = { path = "../sim-state" }
+sim-units = { path = "../sim-units" }
+
+[lib]
+path = "src/lib.rs"

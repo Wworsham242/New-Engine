@@ -1,0 +1,14 @@
+[package]
+name = "sim-kernel"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sim-state = { path = "../sim-state" }
+subsystem-demographics = { path = "../subsystem-demographics" }
+subsystem-economy = { path = "../subsystem-economy" }
+subsystem-energy = { path = "../subsystem-energy" }
+subsystem-governance = { path = "../subsystem-governance" }
+
+[lib]
+path = "src/lib.rs"
