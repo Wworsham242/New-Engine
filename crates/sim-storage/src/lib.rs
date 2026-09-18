@@ -14,6 +14,10 @@ impl<T: Clone> Dense1<T> {
 }
 
 impl<T> Dense1<T> {
+    pub fn from_vec(values: Vec<T>) -> Self {
+        Self { values }
+    }
+
     pub fn len(&self) -> usize {
         self.values.len()
     }
@@ -32,6 +36,10 @@ impl<T> Dense1<T> {
 
     pub fn as_slice(&self) -> &[T] {
         &self.values
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.values
     }
 }
 
@@ -73,6 +81,22 @@ impl<T> Dense2<T> {
             return None;
         }
         self.values.get_mut(row * self.cols + col)
+    }
+
+    pub fn row(&self, row: usize) -> Option<&[T]> {
+        if row >= self.rows {
+            return None;
+        }
+        let start = row * self.cols;
+        Some(&self.values[start..start + self.cols])
+    }
+
+    pub fn row_mut(&mut self, row: usize) -> Option<&mut [T]> {
+        if row >= self.rows {
+            return None;
+        }
+        let start = row * self.cols;
+        Some(&mut self.values[start..start + self.cols])
     }
 
     pub fn canonical_values(&self) -> &[T] {
@@ -122,6 +146,13 @@ mod tests {
         let mut store = Dense2::new(2, 3, 0_u32);
         *store.get_mut(1, 2).unwrap() = 9;
         assert_eq!(store.canonical_values(), &[0, 0, 0, 0, 0, 9]);
+    }
+
+    #[test]
+    fn dense2_row_is_contiguous() {
+        let mut store = Dense2::new(2, 3, 0_u32);
+        store.row_mut(1).unwrap().copy_from_slice(&[4, 5, 6]);
+        assert_eq!(store.row(1).unwrap(), &[4, 5, 6]);
     }
 
     #[test]

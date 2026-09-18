@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+sim-registry = { path = "../sim-registry" }
+sim-storage = { path = "../sim-storage" }
 blake3.workspace = true
 sim-types = { path = "../sim-types" }
 sim-units = { path = "../sim-units" }

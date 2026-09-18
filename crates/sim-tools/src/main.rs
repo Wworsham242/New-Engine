@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         [a, b] if a == "equations" && b == "list" => equations_list(),
         [a, b] if a == "variables" && b == "list" => variables_list(),
         [a, b] if a == "solvers" && b == "list" => solvers_list(),
-        [] => phase001_demo(),
+        [] => world_demo(),
         _ => {
             eprintln!("Usage:");
             eprintln!("  cargo run -p sim-tools");
@@ -100,54 +100,70 @@ fn solvers_list() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn phase001_demo() -> Result<(), Box<dyn std::error::Error>> {
-    // Startup model validation is now mandatory for the CLI.
+fn world_demo() -> Result<(), Box<dyn std::error::Error>> {
     let registry = sim_kernel::registry::model_registry();
     registry
         .validate()
         .map_err(|err| format!("model registry validation failed: {err:?}"))?;
 
-    let initial = WorldState::default();
+    let initial = WorldState::demo();
+    initial.validate()?;
+
+    let usa = initial.country_id_by_key("USA").unwrap();
+    let oil = initial.energy_type_id_by_key("oil").unwrap();
+
     let kernel = SimulationKernel::default();
 
     let mut baseline = initial.clone();
     let baseline_report = kernel.step(&mut baseline, None)?;
 
     let mut shock = initial;
-    let shock_report = kernel.step(&mut shock, Some(Shock::EnergyCapacityLossFraction(0.50)))?;
+    let shock_report = kernel.step(
+        &mut shock,
+        Some(Shock::EnergyCapacityLossFraction {
+            country: usa,
+            energy_type: oil,
+            fraction: 0.50,
+        }),
+    )?;
 
-    println!("New Engine deterministic vertical slice");
+    println!("New Engine Phase 003 country-indexed deterministic world slice");
     println!(
-        "registry: variables={} equations={} solver_groups={}",
+        "world: countries={} energy_types={} variables={} equations={} solver_groups={}",
+        baseline.country_count(),
+        baseline.energy_type_count(),
         registry.variables.len(),
         registry.equations.len(),
         registry.solver_groups.len(),
     );
     println!();
-    println!(
-        "baseline: tick={} energy_capacity={:.3} production={:.3} price={:.6} gdp={:.3} revenue={:.3}",
-        baseline.tick.0,
-        baseline.energy.capacity.0,
-        baseline.energy.production.0,
-        baseline.energy.price_index.0,
-        baseline.economy.gdp.0,
-        baseline.governance.revenue.0,
-    );
+
+    for country in baseline.registry.countries() {
+        let i = country.id.index();
+        println!(
+            "{} baseline: gdp={:.3} energy_price={:.6} shortage={:.6} revenue={:.3}",
+            country.key,
+            baseline.economy.gdp.get(i).unwrap().0,
+            baseline.energy.price_index.get(i).unwrap().0,
+            baseline.energy.shortage_fraction.get(i).unwrap().0,
+            baseline.governance.revenue.get(i).unwrap().0,
+        );
+        println!(
+            "{} shock:    gdp={:.3} energy_price={:.6} shortage={:.6} revenue={:.3}",
+            country.key,
+            shock.economy.gdp.get(i).unwrap().0,
+            shock.energy.price_index.get(i).unwrap().0,
+            shock.energy.shortage_fraction.get(i).unwrap().0,
+            shock.governance.revenue.get(i).unwrap().0,
+        );
+        println!();
+    }
+
     println!(
         "baseline solver: iterations={} converged={} residual={:.3e}",
         baseline_report.iterations, baseline_report.converged, baseline_report.max_residual,
     );
     println!("baseline hash: {}", baseline_report.state_hash.to_hex());
-    println!();
-    println!(
-        "shock:    tick={} energy_capacity={:.3} production={:.3} price={:.6} gdp={:.3} revenue={:.3}",
-        shock.tick.0,
-        shock.energy.capacity.0,
-        shock.energy.production.0,
-        shock.energy.price_index.0,
-        shock.economy.gdp.0,
-        shock.governance.revenue.0,
-    );
     println!(
         "shock solver: iterations={} converged={} residual={:.3e}",
         shock_report.iterations, shock_report.converged, shock_report.max_residual,
