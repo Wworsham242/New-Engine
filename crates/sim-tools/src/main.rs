@@ -47,13 +47,14 @@ fn variables_list() -> Result<(), Box<dyn std::error::Error>> {
 
     for variable in registry.variables {
         println!(
-            "{:>4}  {:<40} owner={:?} unit={} kind={:?} scope={:?}",
+            "{:>4}  {:<40} owner={:?} unit={} kind={:?} scope={:?} temporal={:?}",
             variable.id.0,
             variable.key,
             variable.owner,
             variable.unit_key,
             variable.kind,
             variable.scope,
+            variable.temporal,
         );
     }
     Ok(())
@@ -67,7 +68,7 @@ fn equations_list() -> Result<(), Box<dyn std::error::Error>> {
 
     for equation in registry.equations {
         println!(
-            "{:>4}  {:<52} owner={:?} class={:?} group={:?}",
+            "{:>4}  {:<56} owner={:?} class={:?} group={:?}",
             equation.id.0,
             equation.key,
             equation.owner,
@@ -116,19 +117,9 @@ fn world_demo() -> Result<(), Box<dyn std::error::Error>> {
     let kernel = SimulationKernel::default();
 
     let mut baseline = initial.clone();
-    let baseline_report = kernel.step(&mut baseline, None)?;
-
     let mut shock = initial;
-    let shock_report = kernel.step(
-        &mut shock,
-        Some(Shock::EnergyCapacityLossFraction {
-            country: usa,
-            energy_type: oil,
-            fraction: 0.50,
-        }),
-    )?;
 
-    println!("New Engine Phase 004 international energy transmission slice");
+    println!("New Engine Phase 005 delayed energy-buffer transmission slice");
     println!(
         "world: countries={} energy_types={} variables={} equations={} solver_groups={}",
         baseline.country_count(),
@@ -138,62 +129,99 @@ fn world_demo() -> Result<(), Box<dyn std::error::Error>> {
         registry.solver_groups.len(),
     );
     println!();
-
-    let baseline_usa_can = baseline
-        .energy
-        .realized_trade_by_type
-        .get(usa.index(), can.index(), oil.0 as usize)
-        .unwrap()
-        .0;
-    let shock_usa_can = shock
-        .energy
-        .realized_trade_by_type
-        .get(usa.index(), can.index(), oil.0 as usize)
-        .unwrap()
-        .0;
-
     println!(
-        "USA -> CAN oil flow: baseline={:.3} shock={:.3}",
-        baseline_usa_can, shock_usa_can
-    );
-    println!(
-        "trade conservation error: baseline={:.3e} shock={:.3e}",
-        subsystem_energy::trade_conservation_error(&baseline.energy),
-        subsystem_energy::trade_conservation_error(&shock.energy),
+        "shock: USA oil capacity -50% at month 1; transit delay=1 month; Canadian oil inventory starts at {:.3}",
+        shock
+            .energy
+            .inventory_by_type
+            .get(can.index(), oil.0 as usize)
+            .unwrap()
+            .0
     );
     println!();
 
-    for country in baseline.registry.countries() {
-        let i = country.id.index();
+    for month in 1..=4 {
+        let baseline_report = kernel.step(&mut baseline, None)?;
+
+        let shock_report = kernel.step(
+            &mut shock,
+            if month == 1 {
+                Some(Shock::EnergyCapacityLossFraction {
+                    country: usa,
+                    energy_type: oil,
+                    fraction: 0.50,
+                })
+            } else {
+                None
+            },
+        )?;
+
+        let baseline_flow = baseline
+            .energy
+            .realized_trade_by_type
+            .get(usa.index(), can.index(), oil.0 as usize)
+            .unwrap()
+            .0;
+        let shock_flow = shock
+            .energy
+            .realized_trade_by_type
+            .get(usa.index(), can.index(), oil.0 as usize)
+            .unwrap()
+            .0;
+
+        let can_inventory = shock
+            .energy
+            .inventory_by_type
+            .get(can.index(), oil.0 as usize)
+            .unwrap()
+            .0;
+        let can_draw = shock
+            .energy
+            .inventory_draw_by_type
+            .get(can.index(), oil.0 as usize)
+            .unwrap()
+            .0;
+
+        println!("MONTH {month}");
         println!(
-            "{} baseline: gdp={:.3} energy_price={:.6} shortage={:.6} revenue={:.3}",
-            country.key,
-            baseline.economy.gdp.get(i).unwrap().0,
-            baseline.energy.price_index.get(i).unwrap().0,
-            baseline.energy.shortage_fraction.get(i).unwrap().0,
-            baseline.governance.revenue.get(i).unwrap().0,
+            "  USA->CAN oil launched: baseline={:.3} shock={:.3}",
+            baseline_flow, shock_flow
         );
         println!(
-            "{} shock:    gdp={:.3} energy_price={:.6} shortage={:.6} revenue={:.3}",
-            country.key,
-            shock.economy.gdp.get(i).unwrap().0,
-            shock.energy.price_index.get(i).unwrap().0,
-            shock.energy.shortage_fraction.get(i).unwrap().0,
-            shock.governance.revenue.get(i).unwrap().0,
+            "  CAN buffer: inventory_end={:.3} draw={:.3}",
+            can_inventory, can_draw
+        );
+        println!(
+            "  CAN baseline: gdp={:.3} price={:.6} shortage={:.6}",
+            baseline.economy.gdp.get(can.index()).unwrap().0,
+            baseline.energy.price_index.get(can.index()).unwrap().0,
+            baseline
+                .energy
+                .shortage_fraction
+                .get(can.index())
+                .unwrap()
+                .0,
+        );
+        println!(
+            "  CAN shock:    gdp={:.3} price={:.6} shortage={:.6}",
+            shock.economy.gdp.get(can.index()).unwrap().0,
+            shock.energy.price_index.get(can.index()).unwrap().0,
+            shock.energy.shortage_fraction.get(can.index()).unwrap().0,
+        );
+        println!(
+            "  solvers: baseline_iter={} shock_iter={} shock_converged={}",
+            baseline_report.iterations, shock_report.iterations, shock_report.converged,
         );
         println!();
     }
 
     println!(
-        "baseline solver: iterations={} converged={} residual={:.3e}",
-        baseline_report.iterations, baseline_report.converged, baseline_report.max_residual,
+        "trade conservation error: baseline={:.3e} shock={:.3e}",
+        subsystem_energy::trade_conservation_error(&baseline.energy),
+        subsystem_energy::trade_conservation_error(&shock.energy),
     );
-    println!("baseline hash: {}", baseline_report.state_hash.to_hex());
-    println!(
-        "shock solver: iterations={} converged={} residual={:.3e}",
-        shock_report.iterations, shock_report.converged, shock_report.max_residual,
-    );
-    println!("shock hash: {}", shock_report.state_hash.to_hex());
+    println!("baseline hash: {}", baseline.canonical_hash().to_hex());
+    println!("shock hash:    {}", shock.canonical_hash().to_hex());
 
     Ok(())
 }

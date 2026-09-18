@@ -10,13 +10,26 @@ pub struct EnergyState {
     pub capacity_by_type: Dense2<EnergyQuantity>,
     pub production_by_type: Dense2<EnergyQuantity>,
 
-    /// Desired physical flows [origin, destination, energy_type].
-    ///
-    /// This is an authoritative commitment/plan in Phase 004.
+    /// Desired physical shipment flows [origin, destination, energy_type].
     pub planned_trade_by_type: Dense3<EnergyQuantity>,
 
-    /// Actually deliverable physical flows after origin production constraints.
+    /// Shipments launched during the current committed tick.
     pub realized_trade_by_type: Dense3<EnergyQuantity>,
+
+    /// Shipments already in transit and available as arrivals this tick.
+    ///
+    /// Phase 005 uses one master-tick transit time. The next committed value
+    /// becomes the following tick's arrivals.
+    pub in_transit_trade_by_type: Dense3<EnergyQuantity>,
+
+    /// Physical inventory/stockpile by country and energy type.
+    pub inventory_by_type: Dense2<EnergyQuantity>,
+
+    /// Reference stock level used by later replenishment policy.
+    pub target_inventory_by_type: Dense2<EnergyQuantity>,
+
+    /// Physical inventory released during the current committed tick.
+    pub inventory_draw_by_type: Dense2<EnergyQuantity>,
 
     pub demand: Dense1<EnergyQuantity>,
     pub price_index: Dense1<PriceIndex>,
@@ -98,17 +111,6 @@ impl WorldState {
         let mut planned_trade_by_type =
             Dense3::new(countries, countries, energy_types, EnergyQuantity(0.0));
 
-        // Balanced physical oil trade fixture:
-        // SAU -> USA = 30
-        // USA -> CAN = 30
-        //
-        // With domestic production totals and demand:
-        // USA: 100 + 30 - 30 = 100
-        // CAN:  50 + 30      = 80
-        // SAU:  60      - 30 = 30
-        //
-        // A USA oil-capacity shock can therefore reduce USA exports to Canada,
-        // transmitting the physical shortage internationally.
         let usa = registry
             .countries()
             .iter()
@@ -141,7 +143,37 @@ impl WorldState {
             .get_mut(usa.index(), can.index(), oil.0 as usize)
             .unwrap() = EnergyQuantity(30.0);
 
+        // Seed transit with the steady-state planned flow so baseline tick 1
+        // begins in equilibrium rather than with an artificial empty pipeline.
+        let in_transit_trade_by_type = planned_trade_by_type.clone();
         let realized_trade_by_type = planned_trade_by_type.clone();
+
+        let mut inventory_by_type = Dense2::new(countries, energy_types, EnergyQuantity(0.0));
+        let mut target_inventory_by_type =
+            Dense2::new(countries, energy_types, EnergyQuantity(0.0));
+
+        // Buffer fixture. Canada can mask two full months plus the arrival
+        // month of a 7.5-unit oil import shortfall before the shortage becomes
+        // visible. USA has a smaller buffer against its own production loss.
+        *inventory_by_type
+            .get_mut(usa.index(), oil.0 as usize)
+            .unwrap() = EnergyQuantity(20.0);
+        *inventory_by_type
+            .get_mut(can.index(), oil.0 as usize)
+            .unwrap() = EnergyQuantity(15.0);
+        *inventory_by_type
+            .get_mut(sau.index(), oil.0 as usize)
+            .unwrap() = EnergyQuantity(10.0);
+
+        *target_inventory_by_type
+            .get_mut(usa.index(), oil.0 as usize)
+            .unwrap() = EnergyQuantity(20.0);
+        *target_inventory_by_type
+            .get_mut(can.index(), oil.0 as usize)
+            .unwrap() = EnergyQuantity(15.0);
+        *target_inventory_by_type
+            .get_mut(sau.index(), oil.0 as usize)
+            .unwrap() = EnergyQuantity(10.0);
 
         Self {
             tick: Tick(0),
@@ -151,6 +183,10 @@ impl WorldState {
                 production_by_type,
                 planned_trade_by_type,
                 realized_trade_by_type,
+                in_transit_trade_by_type,
+                inventory_by_type,
+                target_inventory_by_type,
+                inventory_draw_by_type: Dense2::new(countries, energy_types, EnergyQuantity(0.0)),
                 demand: Dense1::from_vec(vec![
                     EnergyQuantity(100.0),
                     EnergyQuantity(80.0),
@@ -223,31 +259,44 @@ impl WorldState {
         let countries = self.country_count();
         let energy_types = self.energy_type_count();
 
-        if self.economy.gdp.len() != countries
-            || self.economy.potential_gdp.len() != countries
-            || self.economy.investment.len() != countries
-            || self.governance.tax_rate.len() != countries
-            || self.governance.revenue.len() != countries
-            || self.governance.spending.len() != countries
-            || self.demographics.population.len() != countries
-            || self.energy.demand.len() != countries
-            || self.energy.price_index.len() != countries
-            || self.energy.shortage_fraction.len() != countries
+        let dense1_country_lengths = [
+            self.economy.gdp.len(),
+            self.economy.potential_gdp.len(),
+            self.economy.investment.len(),
+            self.governance.tax_rate.len(),
+            self.governance.revenue.len(),
+            self.governance.spending.len(),
+            self.demographics.population.len(),
+            self.energy.demand.len(),
+            self.energy.price_index.len(),
+            self.energy.shortage_fraction.len(),
+        ];
+
+        if dense1_country_lengths.iter().any(|len| *len != countries)
             || self.energy.capacity_by_type.rows() != countries
             || self.energy.production_by_type.rows() != countries
+            || self.energy.inventory_by_type.rows() != countries
+            || self.energy.target_inventory_by_type.rows() != countries
+            || self.energy.inventory_draw_by_type.rows() != countries
             || self.energy.capacity_by_type.cols() != energy_types
             || self.energy.production_by_type.cols() != energy_types
+            || self.energy.inventory_by_type.cols() != energy_types
+            || self.energy.target_inventory_by_type.cols() != energy_types
+            || self.energy.inventory_draw_by_type.cols() != energy_types
             || self.energy.planned_trade_by_type.dim0() != countries
             || self.energy.planned_trade_by_type.dim1() != countries
             || self.energy.planned_trade_by_type.dim2() != energy_types
             || self.energy.realized_trade_by_type.dim0() != countries
             || self.energy.realized_trade_by_type.dim1() != countries
             || self.energy.realized_trade_by_type.dim2() != energy_types
+            || self.energy.in_transit_trade_by_type.dim0() != countries
+            || self.energy.in_transit_trade_by_type.dim1() != countries
+            || self.energy.in_transit_trade_by_type.dim2() != energy_types
         {
             return Err("dense state dimensions do not match world registry");
         }
 
-        for value in self
+        let physical_values = self
             .energy
             .capacity_by_type
             .canonical_values()
@@ -274,6 +323,34 @@ impl WorldState {
                     .iter()
                     .map(|x| x.0),
             )
+            .chain(
+                self.energy
+                    .in_transit_trade_by_type
+                    .canonical_values()
+                    .iter()
+                    .map(|x| x.0),
+            )
+            .chain(
+                self.energy
+                    .inventory_by_type
+                    .canonical_values()
+                    .iter()
+                    .map(|x| x.0),
+            )
+            .chain(
+                self.energy
+                    .target_inventory_by_type
+                    .canonical_values()
+                    .iter()
+                    .map(|x| x.0),
+            )
+            .chain(
+                self.energy
+                    .inventory_draw_by_type
+                    .canonical_values()
+                    .iter()
+                    .map(|x| x.0),
+            )
             .chain(self.energy.demand.as_slice().iter().map(|x| x.0))
             .chain(self.energy.price_index.as_slice().iter().map(|x| x.0))
             .chain(self.energy.shortage_fraction.as_slice().iter().map(|x| x.0))
@@ -283,35 +360,38 @@ impl WorldState {
             .chain(self.governance.tax_rate.as_slice().iter().map(|x| x.0))
             .chain(self.governance.revenue.as_slice().iter().map(|x| x.0))
             .chain(self.governance.spending.as_slice().iter().map(|x| x.0))
-            .chain(self.demographics.population.as_slice().iter().map(|x| x.0))
-        {
+            .chain(self.demographics.population.as_slice().iter().map(|x| x.0));
+
+        for value in physical_values {
             if !value.is_finite() {
                 return Err("authoritative state contains a non-finite value");
             }
-            if value < 0.0 {
+            if value < -1.0e-12 {
                 return Err("authoritative state contains a negative quantity");
             }
         }
 
-        // No self-trade in the Phase-004 physical flow matrix.
         for country in 0..countries {
             for energy_type in 0..energy_types {
+                for matrix in [
+                    &self.energy.planned_trade_by_type,
+                    &self.energy.realized_trade_by_type,
+                    &self.energy.in_transit_trade_by_type,
+                ] {
+                    if matrix.get(country, country, energy_type).unwrap().0 != 0.0 {
+                        return Err("self-trade is not permitted");
+                    }
+                }
+
                 if self
                     .energy
-                    .planned_trade_by_type
-                    .get(country, country, energy_type)
+                    .inventory_by_type
+                    .get(country, energy_type)
                     .unwrap()
                     .0
-                    != 0.0
-                    || self
-                        .energy
-                        .realized_trade_by_type
-                        .get(country, country, energy_type)
-                        .unwrap()
-                        .0
-                        != 0.0
+                    < -1.0e-12
                 {
-                    return Err("self-trade is not permitted");
+                    return Err("inventory cannot be negative");
                 }
             }
         }
@@ -322,7 +402,7 @@ impl WorldState {
     pub fn canonical_hash(&self) -> StateHash {
         let mut hasher = blake3::Hasher::new();
 
-        hasher.update(b"new-engine.world-state.phase004.v1");
+        hasher.update(b"new-engine.world-state.phase005.v1");
         hasher.update(&self.tick.0.to_le_bytes());
 
         for country in self.registry.countries() {
@@ -336,38 +416,59 @@ impl WorldState {
             hash_string(&mut hasher, &energy_type.name);
         }
 
-        hash_f64s(
-            &mut hasher,
+        for values in [
             self.energy
                 .capacity_by_type
                 .canonical_values()
                 .iter()
-                .map(|x| x.0),
-        );
-        hash_f64s(
-            &mut hasher,
+                .map(|x| x.0)
+                .collect::<Vec<_>>(),
             self.energy
                 .production_by_type
                 .canonical_values()
                 .iter()
-                .map(|x| x.0),
-        );
-        hash_f64s(
-            &mut hasher,
+                .map(|x| x.0)
+                .collect(),
             self.energy
                 .planned_trade_by_type
                 .canonical_values()
                 .iter()
-                .map(|x| x.0),
-        );
-        hash_f64s(
-            &mut hasher,
+                .map(|x| x.0)
+                .collect(),
             self.energy
                 .realized_trade_by_type
                 .canonical_values()
                 .iter()
-                .map(|x| x.0),
-        );
+                .map(|x| x.0)
+                .collect(),
+            self.energy
+                .in_transit_trade_by_type
+                .canonical_values()
+                .iter()
+                .map(|x| x.0)
+                .collect(),
+            self.energy
+                .inventory_by_type
+                .canonical_values()
+                .iter()
+                .map(|x| x.0)
+                .collect(),
+            self.energy
+                .target_inventory_by_type
+                .canonical_values()
+                .iter()
+                .map(|x| x.0)
+                .collect(),
+            self.energy
+                .inventory_draw_by_type
+                .canonical_values()
+                .iter()
+                .map(|x| x.0)
+                .collect(),
+        ] {
+            hash_f64s(&mut hasher, values);
+        }
+
         hash_f64s(
             &mut hasher,
             self.energy.demand.as_slice().iter().map(|x| x.0),
@@ -427,27 +528,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn equal_trade_world_has_equal_hash() {
+    fn equal_buffered_world_has_equal_hash() {
         let a = WorldState::demo();
         let b = a.clone();
         assert_eq!(a.canonical_hash(), b.canonical_hash());
     }
 
     #[test]
-    fn trade_change_changes_hash() {
+    fn inventory_change_changes_hash() {
         let a = WorldState::demo();
         let mut b = a.clone();
-
-        let usa = b.country_id_by_key("USA").unwrap();
         let can = b.country_id_by_key("CAN").unwrap();
         let oil = b.energy_type_id_by_key("oil").unwrap();
-
         b.energy
-            .planned_trade_by_type
-            .get_mut(usa.index(), can.index(), oil.0 as usize)
+            .inventory_by_type
+            .get_mut(can.index(), oil.0 as usize)
             .unwrap()
             .0 -= 1.0;
-
         assert_ne!(a.canonical_hash(), b.canonical_hash());
     }
 

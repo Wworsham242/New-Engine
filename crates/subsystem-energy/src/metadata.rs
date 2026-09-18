@@ -11,6 +11,10 @@ pub const VAR_SHORTAGE: VariableId = VariableId(13);
 pub const VAR_PRICE: VariableId = VariableId(14);
 pub const VAR_PLANNED_TRADE: VariableId = VariableId(15);
 pub const VAR_REALIZED_TRADE: VariableId = VariableId(16);
+pub const VAR_INVENTORY: VariableId = VariableId(17);
+pub const VAR_TARGET_INVENTORY: VariableId = VariableId(18);
+pub const VAR_IN_TRANSIT_TRADE: VariableId = VariableId(19);
+pub const VAR_INVENTORY_DRAW: VariableId = VariableId(23);
 
 pub static VARIABLES: &[VariableMetadata] = &[
     VariableMetadata {
@@ -79,8 +83,48 @@ pub static VARIABLES: &[VariableMetadata] = &[
         owner: SubsystemId::Energy,
         unit_key: "energy_quantity",
         kind: VariableKind::Flow,
-        temporal: TemporalSemantics::CurrentIteration,
+        temporal: TemporalSemantics::CurrentCommitted,
         scope: ScopeKind::CountryPairEnergyType,
+        provenance: &[ProvenanceTag::OriginalDesign],
+    },
+    VariableMetadata {
+        id: VAR_INVENTORY,
+        key: "energy.inventory",
+        owner: SubsystemId::Energy,
+        unit_key: "energy_quantity",
+        kind: VariableKind::Stock,
+        temporal: TemporalSemantics::CurrentCommitted,
+        scope: ScopeKind::CountryEnergyType,
+        provenance: &[ProvenanceTag::OriginalDesign],
+    },
+    VariableMetadata {
+        id: VAR_TARGET_INVENTORY,
+        key: "energy.target_inventory",
+        owner: SubsystemId::Energy,
+        unit_key: "energy_quantity",
+        kind: VariableKind::Parameter,
+        temporal: TemporalSemantics::CurrentCommitted,
+        scope: ScopeKind::CountryEnergyType,
+        provenance: &[ProvenanceTag::OriginalDesign],
+    },
+    VariableMetadata {
+        id: VAR_IN_TRANSIT_TRADE,
+        key: "energy.in_transit_trade",
+        owner: SubsystemId::Energy,
+        unit_key: "energy_quantity",
+        kind: VariableKind::Stock,
+        temporal: TemporalSemantics::PipelineState,
+        scope: ScopeKind::CountryPairEnergyType,
+        provenance: &[ProvenanceTag::OriginalDesign],
+    },
+    VariableMetadata {
+        id: VAR_INVENTORY_DRAW,
+        key: "energy.inventory_draw",
+        owner: SubsystemId::Energy,
+        unit_key: "energy_quantity",
+        kind: VariableKind::Flow,
+        temporal: TemporalSemantics::CurrentCommitted,
+        scope: ScopeKind::CountryEnergyType,
         provenance: &[ProvenanceTag::OriginalDesign],
     },
 ];
@@ -93,6 +137,16 @@ static ENERGY_INPUTS: &[EquationInput] = &[
     },
     EquationInput {
         variable: VAR_PLANNED_TRADE,
+        source: InputSourceKind::LocalVariable,
+        temporal: TemporalSemantics::CurrentCommitted,
+    },
+    EquationInput {
+        variable: VAR_IN_TRANSIT_TRADE,
+        source: InputSourceKind::LocalVariable,
+        temporal: TemporalSemantics::PipelineState,
+    },
+    EquationInput {
+        variable: VAR_INVENTORY,
         source: InputSourceKind::LocalVariable,
         temporal: TemporalSemantics::CurrentCommitted,
     },
@@ -113,6 +167,18 @@ static ENERGY_OUTPUTS: &[EquationOutput] = &[
         semantics: OutputSemantics::Set,
     },
     EquationOutput {
+        variable: VAR_IN_TRANSIT_TRADE,
+        semantics: OutputSemantics::Set,
+    },
+    EquationOutput {
+        variable: VAR_INVENTORY,
+        semantics: OutputSemantics::Set,
+    },
+    EquationOutput {
+        variable: VAR_INVENTORY_DRAW,
+        semantics: OutputSemantics::Set,
+    },
+    EquationOutput {
         variable: VAR_DEMAND,
         semantics: OutputSemantics::Set,
     },
@@ -128,7 +194,7 @@ static ENERGY_OUTPUTS: &[EquationOutput] = &[
 
 pub static EQUATIONS: &[EquationMetadata] = &[EquationMetadata {
     id: EquationId(2001),
-    key: "energy.phase004_balance_trade_and_price",
+    key: "energy.phase005_balance_trade_inventory_and_price",
     owner: SubsystemId::Energy,
     class: EquationClass::SolverComponent,
     cadence: Cadence::Monthly,
@@ -139,5 +205,5 @@ pub static EQUATIONS: &[EquationMetadata] = &[EquationMetadata {
         ProvenanceTag::OriginalDesign,
         ProvenanceTag::PerformanceSimplification,
     ],
-    description: "Phase-004 uncalibrated physical energy balance with conserved country-to-country trade; architecture demonstration only.",
+    description: "Phase-005 uncalibrated physical energy balance with one-tick transit and explicit inventory buffers; architecture demonstration only.",
 }];

@@ -66,6 +66,10 @@ impl SimulationKernel {
             );
         }
 
+        // ADR-005: physical time advances once per master tick, never once per
+        // solver iteration. This temporal base remains immutable during solve.
+        let energy_temporal_base = world.energy.clone();
+
         let mut energy = world.energy.clone();
         let mut economy = world.economy.clone();
         let country_count = world.country_count();
@@ -78,7 +82,6 @@ impl SimulationKernel {
             iterations = iteration;
             max_residual = 0.0;
 
-            // C[n] contract snapshots.
             let economy_to_energy: Vec<_> = (0..country_count)
                 .map(|index| {
                     subsystem_economy::publish_to_energy(&economy, CountryId(index as u32))
@@ -89,9 +92,8 @@ impl SimulationKernel {
                 .map(|index| subsystem_energy::publish(&energy, CountryId(index as u32)))
                 .collect();
 
-            // Energy now solves one globally connected physical trade candidate.
             let energy_candidate =
-                subsystem_energy::solve_global_candidate(&energy, &economy_to_energy);
+                subsystem_energy::solve_global_candidate(&energy_temporal_base, &economy_to_energy);
 
             let economy_candidates: Vec<_> = (0..country_count)
                 .map(|index| {
@@ -104,7 +106,6 @@ impl SimulationKernel {
                 })
                 .collect();
 
-            // Canonical residual reduction.
             for index in 0..country_count {
                 let current_gdp = economy.gdp.get(index).unwrap().0;
                 let current_price = energy.price_index.get(index).unwrap().0;
@@ -118,8 +119,7 @@ impl SimulationKernel {
                 max_residual = max_residual.max(gdp_residual.max(price_residual));
             }
 
-            // Barrier then deterministic damping.
-            subsystem_energy::blend_global(&mut energy, &energy_candidate, self.solver.damping);
+            subsystem_energy::apply_candidate(&mut energy, &energy_candidate, self.solver.damping);
 
             for index in 0..country_count {
                 subsystem_economy::blend_country(
@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn same_international_input_produces_same_hash() {
+    fn same_delayed_input_produces_same_hash() {
         let kernel = SimulationKernel::default();
         let mut a = WorldState::demo();
         let mut b = WorldState::demo();
@@ -190,52 +190,102 @@ mod tests {
         let shock_a = usa_oil_shock(&a);
         let shock_b = usa_oil_shock(&b);
 
-        let ra = kernel.step(&mut a, Some(shock_a)).unwrap();
-        let rb = kernel.step(&mut b, Some(shock_b)).unwrap();
+        for month in 0..4 {
+            let sa = if month == 0 { Some(shock_a) } else { None };
+            let sb = if month == 0 { Some(shock_b) } else { None };
+            kernel.step(&mut a, sa).unwrap();
+            kernel.step(&mut b, sb).unwrap();
+        }
 
-        assert_eq!(ra.state_hash, rb.state_hash);
+        assert_eq!(a.canonical_hash(), b.canonical_hash());
     }
 
     #[test]
-    fn usa_energy_shock_propagates_to_canada_through_physical_trade() {
+    fn canadian_effect_is_delayed_by_transit_and_inventory_buffers() {
         let kernel = SimulationKernel::default();
+
         let mut baseline = WorldState::demo();
         let mut shock = baseline.clone();
         let shock_event = usa_oil_shock(&shock);
 
-        kernel.step(&mut baseline, None).unwrap();
-        kernel.step(&mut shock, Some(shock_event)).unwrap();
+        let can = shock.country_id_by_key("CAN").unwrap();
+
+        let mut baseline_can_gdp = Vec::new();
+        let mut shock_can_gdp = Vec::new();
+
+        for month in 0..4 {
+            kernel.step(&mut baseline, None).unwrap();
+            kernel
+                .step(
+                    &mut shock,
+                    if month == 0 { Some(shock_event) } else { None },
+                )
+                .unwrap();
+
+            baseline_can_gdp.push(*baseline.economy.gdp.get(can.index()).unwrap());
+            shock_can_gdp.push(*shock.economy.gdp.get(can.index()).unwrap());
+        }
+
+        // Month 1: old shipments are already in transit.
+        assert_eq!(shock_can_gdp[0].0, baseline_can_gdp[0].0);
+
+        // Months 2-3: Canadian inventory absorbs the import shortfall.
+        assert_eq!(shock_can_gdp[1].0, baseline_can_gdp[1].0);
+        assert_eq!(shock_can_gdp[2].0, baseline_can_gdp[2].0);
+
+        // Month 4: buffer is depleted and macro effects emerge.
+        assert!(shock_can_gdp[3].0 < baseline_can_gdp[3].0);
+    }
+
+    #[test]
+    fn solver_iterations_do_not_multiply_inventory_depletion() {
+        let kernel = SimulationKernel::default();
+        let mut shock = WorldState::demo();
 
         let usa = shock.country_id_by_key("USA").unwrap();
-        let can = shock.country_id_by_key("CAN").unwrap();
         let oil = shock.energy_type_id_by_key("oil").unwrap();
 
-        assert!(
-            shock.economy.gdp.get(usa.index()).unwrap().0
-                < baseline.economy.gdp.get(usa.index()).unwrap().0
-        );
-
-        // Canada's economy now moves because the USA cannot fully meet the
-        // planned USA -> CAN oil flow after the capacity shock.
-        assert!(
-            shock.economy.gdp.get(can.index()).unwrap().0
-                < baseline.economy.gdp.get(can.index()).unwrap().0
-        );
-
-        let baseline_flow = baseline
+        // Use a deliberately small opening buffer so the primitive capacity
+        // shock both draws inventory and leaves a residual shortage. That
+        // guarantees the Economy<->Energy solver needs multiple numerical
+        // iterations, which is necessary for this test to exercise the
+        // ADR-005 invariant.
+        shock
             .energy
-            .realized_trade_by_type
-            .get(usa.index(), can.index(), oil.0 as usize)
+            .inventory_by_type
+            .get_mut(usa.index(), oil.0 as usize)
             .unwrap()
-            .0;
-        let shock_flow = shock
+            .0 = 5.0;
+
+        let event = usa_oil_shock(&shock);
+
+        let before = shock
             .energy
-            .realized_trade_by_type
-            .get(usa.index(), can.index(), oil.0 as usize)
+            .inventory_by_type
+            .get(usa.index(), oil.0 as usize)
             .unwrap()
             .0;
 
-        assert!(shock_flow < baseline_flow);
-        assert!(subsystem_energy::trade_conservation_error(&shock.energy) <= 1.0e-12);
+        let report = kernel.step(&mut shock, Some(event)).unwrap();
+
+        let after = shock
+            .energy
+            .inventory_by_type
+            .get(usa.index(), oil.0 as usize)
+            .unwrap()
+            .0;
+
+        let draw = shock
+            .energy
+            .inventory_draw_by_type
+            .get(usa.index(), oil.0 as usize)
+            .unwrap()
+            .0;
+
+        assert!(report.iterations > 1);
+        assert!(draw > 0.0);
+        assert!(after >= -1.0e-12);
+        assert!(draw <= before + 1.0e-12);
+        assert!((before - draw - after).abs() <= 1.0e-12);
     }
 }
