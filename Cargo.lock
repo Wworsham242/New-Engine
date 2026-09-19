@@ -119,6 +119,8 @@ name = "sim-state"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "sim-registry",
+ "sim-storage",
  "sim-types",
  "sim-units",
 ]
@@ -134,6 +136,7 @@ dependencies = [
  "sim-kernel",
  "sim-registry",
  "sim-state",
+ "subsystem-energy",
 ]
 
 [[package]]
@@ -172,6 +175,7 @@ dependencies = [
  "sim-contracts",
  "sim-equations",
  "sim-state",
+ "sim-storage",
  "sim-types",
  "sim-units",
 ]
