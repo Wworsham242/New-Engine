@@ -193,13 +193,13 @@ impl ModelRegistry {
         validate_unique_keys(self.solver_groups.iter().map(|x| x.key), "solver group key")?;
 
         for equation in self.equations {
-            if let Some(group_id) = equation.solver_group {
-                if !self.solver_groups.iter().any(|g| g.id == group_id) {
-                    return Err(RegistryError::UnknownSolverGroup {
-                        equation: equation.id,
-                        group: group_id,
-                    });
-                }
+            if let Some(group_id) = equation.solver_group
+                && !self.solver_groups.iter().any(|g| g.id == group_id)
+            {
+                return Err(RegistryError::UnknownSolverGroup {
+                    equation: equation.id,
+                    group: group_id,
+                });
             }
 
             for input in equation.inputs {

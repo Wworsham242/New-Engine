@@ -175,7 +175,7 @@ pub fn solve_global_candidate(
     let mut next_inventory_by_type = temporal_base.inventory_by_type.clone();
     let mut inventory_draw_by_type = Dense2::new(countries, energy_types, EnergyQuantity(0.0));
 
-    for country in 0..countries {
+    for (country, economy_contract) in economy.iter().enumerate() {
         let domestic_production: f64 = production_by_type
             .row(country)
             .unwrap()
@@ -201,7 +201,7 @@ pub fn solve_global_candidate(
             }
         }
 
-        let desired_demand = (economy[country].gdp.0 / 10.0).max(1.0);
+        let desired_demand = (economy_contract.gdp.0 / 10.0).max(1.0);
         let pre_buffer_supply = (domestic_production + arrivals - launched_exports).max(0.0);
         let gap = (desired_demand - pre_buffer_supply).max(0.0);
 

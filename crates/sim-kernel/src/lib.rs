@@ -106,10 +106,10 @@ impl SimulationKernel {
                 })
                 .collect();
 
-            for index in 0..country_count {
+            for (index, economy_candidate) in economy_candidates.iter().enumerate() {
                 let current_gdp = economy.gdp.get(index).unwrap().0;
                 let current_price = energy.price_index.get(index).unwrap().0;
-                let candidate_gdp = economy_candidates[index].0;
+                let candidate_gdp = economy_candidate.0;
                 let candidate_price = energy_candidate.price_index.get(index).unwrap().0;
 
                 let gdp_residual = (candidate_gdp - current_gdp).abs() / current_gdp.abs().max(1.0);
@@ -121,11 +121,11 @@ impl SimulationKernel {
 
             subsystem_energy::apply_candidate(&mut energy, &energy_candidate, self.solver.damping);
 
-            for index in 0..country_count {
+            for (index, economy_candidate) in economy_candidates.iter().copied().enumerate() {
                 subsystem_economy::blend_country(
                     &mut economy,
                     CountryId(index as u32),
-                    economy_candidates[index],
+                    economy_candidate,
                     self.solver.damping,
                 );
             }
